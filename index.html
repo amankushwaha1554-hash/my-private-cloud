@@ -1,0 +1,123 @@
+
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Private Cloud</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body{font-family:Arial,sans-serif;background:#f1f5f9;margin:0;padding:20px}
+    main{max-width:600px;margin:auto;background:white;padding:22px;border-radius:16px}
+    input,button{box-sizing:border-box;width:100%;padding:12px;margin:7px 0}
+    button{background:#176b50;color:white;border:0;border-radius:8px}
+    .file{padding:12px;border-bottom:1px solid #ddd;overflow-wrap:anywhere}
+    #app{display:none}
+  </style>
+</head>
+<body>
+<main>
+  <h2>☁️ My Private Cloud</h2>
+  <section id="login">
+    <h3>Login / Sign up</h3>
+    <input id="email" type="email" placeholder="Email address">
+    <input id="password" type="password" placeholder="Password">
+    <button onclick="signIn()">Login</button>
+    <button onclick="signUp()">Create account</button>
+  </section>
+
+  <section id="app">
+    <p id="who"></p>
+    <button onclick="logout()">Logout</button>
+    <h3>Upload files</h3>
+    <input id="files" type="file" multiple>
+    <button onclick="uploadFiles()">Upload selected files</button>
+    <p id="status"></p>
+    <h3>My files</h3>
+    <button onclick="listFiles()">Refresh files</button>
+    <div id="fileList"></div>
+  </section>
+</main>
+
+<script>
+const SUPABASE_URL = "https://jkjuxnxkglncprhidyxh.supabase.co";
+const SUPABASE_KEY = "sb_publishable_NafUA4x7eotFmHLC7Q48xw_eZ8fw0hj";
+const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const bucket = "private-files";
+
+function message(t){document.getElementById("status").textContent=t;}
+
+async function signUp(){
+  const email=document.getElementById("email").value.trim();
+  const password=document.getElementById("password").value;
+  if(!email||password.length<8){alert("Email bharein aur password kam se kam 8 characters ka rakhein.");return;}
+  const {error}=await client.auth.signUp({email,password});
+  alert(error ? error.message : "Signup request sent. Email confirmation zaroori ho sakti hai; apna email check karein.");
+}
+
+async function signIn(){
+  const email=document.getElementById("email").value.trim();
+  const password=document.getElementById("password").value;
+  const {data,error}=await client.auth.signInWithPassword({email,password});
+  if(error){alert(error.message);return;}
+  showApp(data.user);
+}
+
+async function showApp(user){
+  document.getElementById("login").style.display="none";
+  document.getElementById("app").style.display="block";
+  document.getElementById("who").textContent="Logged in: "+user.email;
+  await listFiles();
+}
+
+async function logout(){
+  await client.auth.signOut();
+  document.getElementById("app").style.display="none";
+  document.getElementById("login").style.display="block";
+}
+
+async function uploadFiles(){
+  const chosen=[...document.getElementById("files").files];
+  if(!chosen.length){message("Pehle files select karein.");return;}
+  message("Uploading...");
+  for(const file of chosen){
+    const path=client.auth.getSession ? null : null;
+    const {data:{user},error:userError}=await client.auth.getUser();
+    if(userError||!user){message("Please login again.");return;}
+    const safeName=file.name.replace(/[^\w.\-() ]/g,"_");
+    const objectPath=user.id+"/"+Date.now()+"_"+safeName;
+    const {error}=await client.storage.from(bucket).upload(objectPath,file,{upsert:false});
+    if(error){message("Upload error: "+error.message);return;}
+  }
+  message("Upload complete!");
+  document.getElementById("files").value="";
+  await listFiles();
+}
+
+async function listFiles(){
+  const {data:{user},error:userError}=await client.auth.getUser();
+  if(userError||!user){return;}
+  const {data,error}=await client.storage.from(bucket).list(user.id,{limit:100,sortBy:{column:"name",order:"desc"}});
+  const list=document.getElementById("fileList");
+  list.replaceChildren();
+  if(error){list.textContent="List error: "+error.message;return;}
+  if(!data.length){list.textContent="Abhi koi file nahi hai.";return;}
+  for(const f of data){
+    const row=document.createElement("div");row.className="file";
+    const name=document.createElement("p");name.textContent=f.name;
+    const download=document.createElement("button");download.textContent="Download";
+    download.onclick=async()=>{
+      const {data,error}=await client.storage.from(bucket).createSignedUrl(user.id+"/"+f.name,60);
+      if(error){alert(error.message);return;}
+      window.open(data.signedUrl,"_blank","noopener");
+    };
+    row.append(name,download);list.append(row);
+  }
+}
+
+client.auth.onAuthStateChange((event,session)=>{
+  if(session?.user) showApp(session.user);
+});
+</script>
+</body>
+</html>
